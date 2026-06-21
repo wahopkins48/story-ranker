@@ -1,0 +1,538 @@
+import React, { useState, useMemo } from "react";
+
+// Scoring dimensions tuned for narrated atmospheric horror.
+// Each has a weight reflecting how much it matters for an audio-first channel.
+const CRITERIA = [
+  {
+    key: "coldOpen",
+    label: "Cold open",
+    weight: 1.4,
+    hint: "Hooks in the first 2–3 sentences. No throat-clearing.",
+  },
+  {
+    key: "dread",
+    label: "Dread over gore",
+    weight: 1.3,
+    hint: "Slow, atmospheric unease beats shock and blood.",
+  },
+  {
+    key: "ending",
+    label: "Unresolved ending",
+    weight: 1.2,
+    hint: "Leaves a question hanging. Doesn't over-explain.",
+  },
+  {
+    key: "pacing",
+    label: "Pacing fit",
+    weight: 1.1,
+    hint: "Tight tension-to-wordcount. Trims to runtime cleanly.",
+  },
+  {
+    key: "grounding",
+    label: "Believability",
+    weight: 1.0,
+    hint: "Mundane details feel real before the wrong thing happens.",
+  },
+  {
+    key: "narratability",
+    label: "Narratability",
+    weight: 1.0,
+    hint: "Few dialogue tags, single voice, no visual-only formatting.",
+  },
+  {
+    key: "freshness",
+    label: "Freshness",
+    weight: 0.9,
+    hint: "Not the 15th night-shift-security story. Fresh premise.",
+  },
+];
+
+const SCORE_LABELS = ["—", "Weak", "Thin", "Fair", "Strong", "Exceptional"];
+
+const VERDICTS = [
+  { min: 88, label: "Top of queue", tone: "high" },
+  { min: 72, label: "Strong candidate", tone: "mid" },
+  { min: 55, label: "Usable with edits", tone: "low" },
+  { min: 0, label: "Pass / archive", tone: "pass" },
+];
+
+function maxRaw() {
+  return CRITERIA.reduce((s, c) => s + 5 * c.weight, 0);
+}
+
+function computeScore(scores) {
+  const raw = CRITERIA.reduce(
+    (s, c) => s + (scores[c.key] || 0) * c.weight,
+    0
+  );
+  return Math.round((raw / maxRaw()) * 100);
+}
+
+function verdictFor(total, hasAny) {
+  if (!hasAny) return { label: "Not yet scored", tone: "empty" };
+  return VERDICTS.find((v) => total >= v.min);
+}
+
+const toneColors = {
+  high: "#7fd1ae",
+  mid: "#c9b870",
+  low: "#c98a5a",
+  pass: "#8a6a6a",
+  empty: "#5a5560",
+};
+
+export default function StoryRanker() {
+  const [queue, setQueue] = useState([]);
+  const [title, setTitle] = useState("");
+  const [submitter, setSubmitter] = useState("");
+  const [scores, setScores] = useState({});
+  const [notes, setNotes] = useState("");
+
+  const liveTotal = useMemo(() => computeScore(scores), [scores]);
+  const hasAny = Object.values(scores).some((v) => v > 0);
+
+  function setScore(key, val) {
+    setScores((s) => ({ ...s, [key]: s[key] === val ? 0 : val }));
+  }
+
+  function addToQueue() {
+    if (!title.trim()) return;
+    const entry = {
+      id: Date.now(),
+      title: title.trim(),
+      submitter: submitter.trim(),
+      scores: { ...scores },
+      notes: notes.trim(),
+      total: computeScore(scores),
+    };
+    setQueue((q) => [...q, entry]);
+    setTitle("");
+    setSubmitter("");
+    setScores({});
+    setNotes("");
+  }
+
+  function removeEntry(id) {
+    setQueue((q) => q.filter((e) => e.id !== id));
+  }
+
+  const sorted = useMemo(
+    () => [...queue].sort((a, b) => b.total - a.total),
+    [queue]
+  );
+
+  return (
+    <div style={styles.page}>
+      <style>{keyframes}</style>
+      <div style={styles.shell}>
+        <header style={styles.header}>
+          <div style={styles.eyebrow}>SUBMISSION TRIAGE</div>
+          <h1 style={styles.h1}>The Reading Room</h1>
+          <p style={styles.sub}>
+            Score each story on what survives being read aloud in the dark.
+            The queue sorts itself. Your judgment still decides.
+          </p>
+        </header>
+
+        <div style={styles.grid}>
+          {/* Scoring panel */}
+          <section style={styles.panel}>
+            <div style={styles.panelLabel}>Score a submission</div>
+
+            <input
+              style={styles.input}
+              placeholder="Story title or first line"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+            <input
+              style={styles.input}
+              placeholder="Submitted by (optional)"
+              value={submitter}
+              onChange={(e) => setSubmitter(e.target.value)}
+            />
+
+            <div style={styles.criteriaList}>
+              {CRITERIA.map((c) => (
+                <div key={c.key} style={styles.criterion}>
+                  <div style={styles.critTop}>
+                    <span style={styles.critLabel}>{c.label}</span>
+                    <span style={styles.critWeight}>
+                      ×{c.weight.toFixed(1)}
+                    </span>
+                  </div>
+                  <div style={styles.hint}>{c.hint}</div>
+                  <div style={styles.dots}>
+                    {[1, 2, 3, 4, 5].map((n) => {
+                      const active = (scores[c.key] || 0) >= n;
+                      const exact = (scores[c.key] || 0) === n;
+                      return (
+                        <button
+                          key={n}
+                          onClick={() => setScore(c.key, n)}
+                          title={SCORE_LABELS[n]}
+                          aria-label={`${c.label}: ${SCORE_LABELS[n]}`}
+                          style={{
+                            ...styles.dot,
+                            ...(active ? styles.dotActive : {}),
+                            ...(exact ? styles.dotExact : {}),
+                          }}
+                        />
+                      );
+                    })}
+                    <span style={styles.dotReadout}>
+                      {SCORE_LABELS[scores[c.key] || 0]}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <textarea
+              style={styles.textarea}
+              placeholder="Gut note — the thing the numbers miss"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+            />
+
+            <div style={styles.liveRow}>
+              <div style={styles.liveScoreWrap}>
+                <div style={styles.liveScore}>{hasAny ? liveTotal : "—"}</div>
+                <div style={styles.liveOutOf}>/ 100</div>
+              </div>
+              <div
+                style={{
+                  ...styles.verdictPill,
+                  color: toneColors[verdictFor(liveTotal, hasAny).tone],
+                  borderColor: toneColors[verdictFor(liveTotal, hasAny).tone],
+                }}
+              >
+                {verdictFor(liveTotal, hasAny).label}
+              </div>
+              <button
+                onClick={addToQueue}
+                disabled={!title.trim()}
+                style={{
+                  ...styles.addBtn,
+                  ...(title.trim() ? {} : styles.addBtnOff),
+                }}
+              >
+                Add to queue
+              </button>
+            </div>
+          </section>
+
+          {/* Queue panel */}
+          <section style={styles.panel}>
+            <div style={styles.panelLabel}>
+              Ranked queue{" "}
+              <span style={styles.count}>
+                {queue.length > 0 ? `(${queue.length})` : ""}
+              </span>
+            </div>
+
+            {sorted.length === 0 ? (
+              <div style={styles.empty}>
+                Nothing scored yet. The strongest story rises to the top
+                once you start.
+              </div>
+            ) : (
+              <div style={styles.queueList}>
+                {sorted.map((e, i) => {
+                  const v = verdictFor(e.total, true);
+                  return (
+                    <div key={e.id} style={styles.queueItem}>
+                      <div style={styles.rank}>{i + 1}</div>
+                      <div style={styles.queueBody}>
+                        <div style={styles.queueTitle}>{e.title}</div>
+                        {e.submitter && (
+                          <div style={styles.queueSub}>{e.submitter}</div>
+                        )}
+                        {e.notes && (
+                          <div style={styles.queueNote}>“{e.notes}”</div>
+                        )}
+                        <div
+                          style={{
+                            ...styles.queueVerdict,
+                            color: toneColors[v.tone],
+                          }}
+                        >
+                          {v.label}
+                        </div>
+                      </div>
+                      <div style={styles.queueRight}>
+                        <div style={styles.queueScore}>{e.total}</div>
+                        <button
+                          onClick={() => removeEntry(e.id)}
+                          style={styles.removeBtn}
+                          aria-label="Remove"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </div>
+
+        <footer style={styles.footer}>
+          A sorter, not a verdict. Weird outliers live where the numbers
+          can't reach — override freely.
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+const keyframes = `
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (max-width: 760px) {
+    .rr-grid { grid-template-columns: 1fr !important; }
+  }
+`;
+
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background:
+      "radial-gradient(ellipse at top, #16131c 0%, #0c0a10 55%, #08070b 100%)",
+    color: "#d8d2dd",
+    fontFamily:
+      "'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif",
+    padding: "clamp(16px, 4vw, 48px)",
+    boxSizing: "border-box",
+  },
+  shell: { maxWidth: 1020, margin: "0 auto" },
+  header: { marginBottom: 36, animation: "rise 0.6s ease both" },
+  eyebrow: {
+    fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+    fontSize: 11,
+    letterSpacing: "0.35em",
+    color: "#6f6478",
+    marginBottom: 14,
+  },
+  h1: {
+    fontSize: "clamp(34px, 6vw, 56px)",
+    fontWeight: 400,
+    margin: 0,
+    lineHeight: 1.02,
+    color: "#ece6f0",
+    letterSpacing: "-0.01em",
+  },
+  sub: {
+    marginTop: 14,
+    maxWidth: 520,
+    fontSize: 16,
+    lineHeight: 1.55,
+    color: "#9a91a3",
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "1.1fr 0.9fr",
+    gap: 20,
+    alignItems: "start",
+  },
+  panel: {
+    background: "rgba(255,255,255,0.022)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 4,
+    padding: "clamp(18px, 3vw, 28px)",
+    animation: "rise 0.7s ease both",
+  },
+  panelLabel: {
+    fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+    fontSize: 11,
+    letterSpacing: "0.28em",
+    textTransform: "uppercase",
+    color: "#7d7286",
+    marginBottom: 20,
+  },
+  count: { color: "#574f60" },
+  input: {
+    width: "100%",
+    boxSizing: "border-box",
+    background: "rgba(0,0,0,0.25)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 3,
+    padding: "11px 13px",
+    color: "#e6e0ea",
+    fontSize: 15,
+    fontFamily: "inherit",
+    marginBottom: 10,
+    outline: "none",
+  },
+  criteriaList: { marginTop: 12, marginBottom: 8 },
+  criterion: {
+    padding: "13px 0",
+    borderTop: "1px solid rgba(255,255,255,0.05)",
+  },
+  critTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+  },
+  critLabel: { fontSize: 16, color: "#ddd6e2" },
+  critWeight: {
+    fontFamily: "ui-monospace, monospace",
+    fontSize: 11,
+    color: "#6a6073",
+  },
+  hint: {
+    fontSize: 12.5,
+    color: "#857b8f",
+    marginTop: 3,
+    marginBottom: 9,
+    lineHeight: 1.4,
+  },
+  dots: { display: "flex", alignItems: "center", gap: 7 },
+  dot: {
+    width: 17,
+    height: 17,
+    borderRadius: "50%",
+    border: "1px solid rgba(255,255,255,0.18)",
+    background: "transparent",
+    cursor: "pointer",
+    padding: 0,
+    transition: "all 0.15s ease",
+  },
+  dotActive: {
+    background: "rgba(167,139,189,0.35)",
+    borderColor: "rgba(167,139,189,0.5)",
+  },
+  dotExact: {
+    background: "#a78bbd",
+    borderColor: "#c4aed6",
+    boxShadow: "0 0 10px rgba(167,139,189,0.5)",
+  },
+  dotReadout: {
+    marginLeft: 8,
+    fontSize: 12,
+    fontFamily: "ui-monospace, monospace",
+    color: "#9a91a3",
+    minWidth: 78,
+  },
+  textarea: {
+    width: "100%",
+    boxSizing: "border-box",
+    background: "rgba(0,0,0,0.25)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 3,
+    padding: "11px 13px",
+    color: "#e6e0ea",
+    fontSize: 14,
+    fontFamily: "inherit",
+    marginTop: 14,
+    resize: "vertical",
+    outline: "none",
+  },
+  liveRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 14,
+    marginTop: 18,
+    flexWrap: "wrap",
+  },
+  liveScoreWrap: { display: "flex", alignItems: "baseline", gap: 4 },
+  liveScore: {
+    fontSize: 40,
+    color: "#ece6f0",
+    fontWeight: 400,
+    lineHeight: 1,
+  },
+  liveOutOf: { fontSize: 13, color: "#6a6073" },
+  verdictPill: {
+    fontFamily: "ui-monospace, monospace",
+    fontSize: 11,
+    letterSpacing: "0.05em",
+    padding: "6px 11px",
+    border: "1px solid",
+    borderRadius: 2,
+    textTransform: "uppercase",
+  },
+  addBtn: {
+    marginLeft: "auto",
+    background: "#a78bbd",
+    color: "#140f1a",
+    border: "none",
+    borderRadius: 3,
+    padding: "11px 18px",
+    fontSize: 14,
+    fontFamily: "inherit",
+    fontWeight: 600,
+    cursor: "pointer",
+    transition: "opacity 0.15s ease",
+  },
+  addBtnOff: { opacity: 0.35, cursor: "not-allowed" },
+  empty: {
+    color: "#6a6073",
+    fontSize: 15,
+    lineHeight: 1.5,
+    fontStyle: "italic",
+    padding: "20px 0",
+  },
+  queueList: { display: "flex", flexDirection: "column", gap: 9 },
+  queueItem: {
+    display: "flex",
+    gap: 14,
+    alignItems: "flex-start",
+    padding: "14px 15px",
+    background: "rgba(0,0,0,0.22)",
+    border: "1px solid rgba(255,255,255,0.05)",
+    borderRadius: 3,
+    animation: "rise 0.4s ease both",
+  },
+  rank: {
+    fontFamily: "ui-monospace, monospace",
+    fontSize: 13,
+    color: "#6a6073",
+    minWidth: 18,
+    paddingTop: 2,
+  },
+  queueBody: { flex: 1, minWidth: 0 },
+  queueTitle: { fontSize: 16, color: "#e6e0ea", lineHeight: 1.3 },
+  queueSub: { fontSize: 12.5, color: "#7d7286", marginTop: 2 },
+  queueNote: {
+    fontSize: 13,
+    color: "#988ea2",
+    fontStyle: "italic",
+    marginTop: 6,
+    lineHeight: 1.4,
+  },
+  queueVerdict: {
+    fontFamily: "ui-monospace, monospace",
+    fontSize: 10.5,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    marginTop: 7,
+  },
+  queueRight: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 8,
+  },
+  queueScore: { fontSize: 24, color: "#ece6f0" },
+  removeBtn: {
+    background: "transparent",
+    border: "none",
+    color: "#574f60",
+    cursor: "pointer",
+    fontSize: 13,
+    padding: 2,
+  },
+  footer: {
+    marginTop: 28,
+    fontSize: 13,
+    color: "#6a6073",
+    fontStyle: "italic",
+    textAlign: "center",
+    lineHeight: 1.5,
+  },
+};
